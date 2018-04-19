@@ -1,0 +1,93 @@
+%GOAL: Run L2 convergence test for Galerkin method
+
+%Much denser evaluation point set
+%==============================================
+ep = load('me070.05041.txt');
+ep = ep(:,1:3);
+nep = ep(:,1).^2+ep(:,2).^2+ep(:,3).^2;
+
+xe = ep(:,1);
+ye = ep(:,2);
+ze = ep(:,3);
+%==============================================
+
+%Quadrature points use denser evaluation point set
+%=======================================================
+%Construct quadrature weights for evaluation points
+%Try (1-t)*log(1-t) points
+disp('Building Quadrature Weights')
+ne = length(ep);
+phiep = (1-ep*ep').*log(1-ep*ep');
+phiep(isnan(phiep))=0;
+phiep = real(phiep);
+PE = construct_poly(ep,1); %Create Spherical Harmonics
+p = min(size(PE));
+ecoefs = [phiep PE; PE' zeros(p,p)]\[eye(ne,ne);zeros(p,ne)];
+clear phiep
+
+
+%Quadrature weights proportional to beta_0 coefficients
+qwe = 2*sqrt(pi)*ecoefs(ne+1,:)';
+clear ecoefs
+
+%Try with ep = ctrs;
+%Test quadrature
+if abs(sum(qwe)-4*pi)>1e-10 || abs(dot(qwe,exp(ep(:,3)))-4*pi*sinh(1))>1e-5
+    disp('Bad quadrature, check work')
+end
+%=======================================================
+
+
+
+u = @(x,y,z) exp(z);
+f = @(x,y,z) exp(z).*(z.^2+2*z);
+ue = u(xe,ye,ze);
+
+%Loop through less dense basis data sets
+%=======================================================
+nums = [19 24 30 34 38 44 50]
+h = [6.5092 5.8926 4.7635 4.1922 3.7878 3.3222 2.9181];
+qe = 2.7359;
+for j=1:length(nums)
+    %Load centers data
+    %=================
+    numstr2 = sprintf('%05d',(nums(j)+1)^2);
+    ctr_str = ['md0' num2str(nums(j)) '.' numstr2 '.txt'];
+    ctrs = load(ctr_str);
+    ctrs = ctrs(:,1:3);
+    n = length(ctrs);
+    %=================
+    
+    
+    phi = (1-ctrs*ctrs').^2.*log(1-ctrs*ctrs'); %(1-r^2)^2log(1-r)
+    phi(1:n+1:n^2)=0;
+    P = construct_poly(ctrs,2); %Polynomial block matrix
+    p = min(size(P));
+    
+    %Calculate Local Lagrange Funcs Coeffs
+    %=====================================================
+    coefs = [phi P; P' zeros(p,p)]\[eye(n,n);zeros(p,n)];
+    %=====================================================
+    
+    [L] = covariant_stiffness(coefs(1:n,:),coefs(n+1:end,:),ctrs,ep,qwe);
+    
+    phie = (1-ep*ctrs').^2.*log(1-ep*ctrs');
+    phie(isnan(phie))=0;
+    PE = construct_poly(ep,2);
+    chie = [phie PE]*coefs;
+    
+    L = L+chie'*diag(qwe)*chie;
+    rc(j) = rcond(L);
+    fe = f(xe,ye,ze);
+    fe = chie'*(fe.*qwe);
+    
+    sol = L\fe; %Solve PDE
+    sol_eval = coefs*sol;   %Assemble approx solution
+    sol_eval = [phie PE]*sol_eval;
+    L2error(j) = sqrt(dot((sol_eval-ue).^2,qwe))    %Calculate L2 error using quadrature
+end
+%=======================================================
+disp(L2error)
+disp(rc)
+    
+    
